@@ -52,7 +52,6 @@ func parseIPV6(addrEntry string) (ipNet *net.IPNet, netInterface string, err err
 	split = split[:i]
 	if len(split) != 6 {
 		err = fmt.Errorf("incorrect format of address entry, has %d components instead of 6", len(split))
-		fmt.Println(split)
 		return
 	}
 	addr := split[0]
@@ -134,7 +133,6 @@ func readLines(path string) ([]string, error) {
 	rd := bufio.NewReader(f)
 	for {
 		line, err := rd.ReadString('\n')
-		fmt.Println(line)
 		if err != nil {
 			if err == io.EOF {
 				break
