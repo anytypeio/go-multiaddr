@@ -7,9 +7,9 @@ import (
 )
 
 var lock = sync.Mutex{}
-var interfaceGetter InterfaceAddrGetter
+var interfaceGetter InterfaceAddrsGetter
 
-func SetInterfaceAddrGetter(getter InterfaceAddrGetter) {
+func SetInterfaceAddrsGetter(getter InterfaceAddrsGetter) {
 	lock.Lock()
 	defer lock.Unlock()
 	interfaceGetter = getter
@@ -20,8 +20,8 @@ type InterfaceAddr struct {
 	Prefix int
 }
 
-type InterfaceAddrGetter interface {
-	Interfaces() []InterfaceAddr
+type InterfaceAddrsGetter interface {
+	InterfaceAddrs() []InterfaceAddr
 }
 
 func maskFromPrefix(prefix, base int) net.IPMask {
@@ -50,7 +50,7 @@ func InterfaceAddrs() (addrs []net.Addr, err error) {
 		return nil, fmt.Errorf("interface getter not set for Android")
 	}
 	lock.Unlock()
-	unmaskedAddrs := interfaceGetter.Interfaces()
+	unmaskedAddrs := interfaceGetter.InterfaceAddrs()
 	for _, addr := range unmaskedAddrs {
 		var mask []byte
 		if len(addr.Ip) == 4 {
