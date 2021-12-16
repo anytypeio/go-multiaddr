@@ -58,10 +58,12 @@ func InterfaceAddrs() (addrs []net.Addr, err error) {
 		} else {
 			mask = ipV6MaskFromPrefix(addr.Prefix)
 		}
-		addrs = append(addrs, &net.IPNet{
+		ip := &net.IPNet{
 			IP:   addr.Ip,
 			Mask: mask,
-		})
+		}
+		fmt.Println("got ip", ip.String())
+		addrs = append(addrs, ip)
 	}
 	return addrs, nil
 }
