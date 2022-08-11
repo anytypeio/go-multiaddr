@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/ipfs/go-cid"
 	mh "github.com/multiformats/go-multihash"
 )
@@ -140,6 +142,7 @@ func TestConstructSucceeds(t *testing.T) {
 		"/udp/1234/udt",
 		"/udp/1234/utp",
 		"/tcp/1234/http",
+		"/tcp/1234/tls/http",
 		"/tcp/1234/https",
 		"/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234",
 		"/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234",
@@ -168,6 +171,9 @@ func TestConstructSucceeds(t *testing.T) {
 		"/ip4/127.0.0.1/tcp/9090/http/p2p-webrtc-direct",
 		"/ip4/127.0.0.1/tcp/127/ws",
 		"/ip4/127.0.0.1/tcp/127/ws",
+		"/ip4/127.0.0.1/tcp/127/tls",
+		"/ip4/127.0.0.1/tcp/127/tls/ws",
+		"/ip4/127.0.0.1/tcp/127/noise",
 		"/ip4/127.0.0.1/tcp/127/wss",
 		"/ip4/127.0.0.1/tcp/127/wss",
 	}
@@ -222,7 +228,7 @@ func TestStringToBytes(t *testing.T) {
 			t.Error("failed to decode hex", h)
 		}
 
-		//t.Log("196", h, []byte(b1))
+		// t.Log("196", h, []byte(b1))
 
 		b2, err := stringToBytes(s)
 		if err != nil {
@@ -425,9 +431,10 @@ func assertValueForProto(t *testing.T, a Multiaddr, p int, exp string) {
 }
 
 func TestGetValue(t *testing.T) {
-	a := newMultiaddr(t, "/ip4/127.0.0.1/utp/tcp/5555/udp/1234/utp/ipfs/QmbHVEEepCi7rn7VL7Exxpd2Ci9NNB6ifvqwhsrbRMgQFP")
+	a := newMultiaddr(t, "/ip4/127.0.0.1/utp/tcp/5555/udp/1234/tls/utp/ipfs/QmbHVEEepCi7rn7VL7Exxpd2Ci9NNB6ifvqwhsrbRMgQFP")
 	assertValueForProto(t, a, P_IP4, "127.0.0.1")
 	assertValueForProto(t, a, P_UTP, "")
+	assertValueForProto(t, a, P_TLS, "")
 	assertValueForProto(t, a, P_TCP, "5555")
 	assertValueForProto(t, a, P_UDP, "1234")
 	assertValueForProto(t, a, P_IPFS, "QmbHVEEepCi7rn7VL7Exxpd2Ci9NNB6ifvqwhsrbRMgQFP")
@@ -528,6 +535,7 @@ func TestRoundTrip(t *testing.T) {
 		"/unix/a/b/c/d",
 		"/ip6/::ffff:127.0.0.1/tcp/111",
 		"/ip4/127.0.0.1/tcp/123",
+		"/ip4/127.0.0.1/tcp/123/tls",
 		"/ip4/127.0.0.1/udp/123",
 		"/ip4/127.0.0.1/udp/123/ip6/::",
 		"/p2p/QmbHVEEepCi7rn7VL7Exxpd2Ci9NNB6ifvqwhsrbRMgQFP",
@@ -630,7 +638,7 @@ func TestZone(t *testing.T) {
 }
 
 func TestBinaryMarshaler(t *testing.T) {
-	addr := newMultiaddr(t, "/ip4/0.0.0.0/tcp/4001")
+	addr := newMultiaddr(t, "/ip4/0.0.0.0/tcp/4001/tls")
 	b, err := addr.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -646,7 +654,7 @@ func TestBinaryMarshaler(t *testing.T) {
 }
 
 func TestTextMarshaler(t *testing.T) {
-	addr := newMultiaddr(t, "/ip4/0.0.0.0/tcp/4001")
+	addr := newMultiaddr(t, "/ip4/0.0.0.0/tcp/4001/tls")
 	b, err := addr.MarshalText()
 	if err != nil {
 		t.Fatal(err)
@@ -662,7 +670,7 @@ func TestTextMarshaler(t *testing.T) {
 }
 
 func TestJSONMarshaler(t *testing.T) {
-	addr := newMultiaddr(t, "/ip4/0.0.0.0/tcp/4001")
+	addr := newMultiaddr(t, "/ip4/0.0.0.0/tcp/4001/tls")
 	b, err := addr.MarshalJSON()
 	if err != nil {
 		t.Fatal(err)
@@ -732,4 +740,25 @@ func TestComponentJSONMarshaler(t *testing.T) {
 	if !comp.Equal(comp2) {
 		t.Error("expected equal components in circular marshaling test")
 	}
+}
+
+func TestFilterAddrs(t *testing.T) {
+	bad := []Multiaddr{
+		newMultiaddr(t, "/ip6/fe80::1/tcp/1234"),
+		newMultiaddr(t, "/ip6/fe80::100/tcp/1234"),
+	}
+	good := []Multiaddr{
+		newMultiaddr(t, "/ip4/127.0.0.1/tcp/1234"),
+		newMultiaddr(t, "/ip4/1.1.1.1/tcp/999"),
+		newMultiaddr(t, "/ip4/1.2.3.4/udp/1234/utp"),
+	}
+	goodAndBad := append(good, bad...)
+
+	filter := func(addr Multiaddr) bool {
+		return addr.Protocols()[0].Code == P_IP4
+	}
+
+	require.Empty(t, FilterAddrs(bad, filter))
+	require.ElementsMatch(t, FilterAddrs(good, filter), good)
+	require.ElementsMatch(t, FilterAddrs(goodAndBad, filter), good)
 }
