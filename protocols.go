@@ -26,19 +26,22 @@ const (
 	P_P2P               = 421
 	P_IPFS              = P_P2P // alias for backwards compatibility
 	P_HTTP              = 480
+	P_HTTP_PATH         = 481
 	P_HTTPS             = 443 // deprecated alias for /tls/http
 	P_ONION             = 444 // also for backwards compatibility
 	P_ONION3            = 445
 	P_GARLIC64          = 446
 	P_GARLIC32          = 447
-	P_P2P_WEBRTC_DIRECT = 276
+	P_P2P_WEBRTC_DIRECT = 276 // Deprecated. use webrtc-direct instead
 	P_TLS               = 448
 	P_SNI               = 449
 	P_NOISE             = 454
 	P_WS                = 477
 	P_WSS               = 478 // deprecated alias for /tls/ws
 	P_PLAINTEXTV2       = 7367777
-	P_WEBRTC            = 280
+	P_WEBRTC_DIRECT     = 280
+	P_WEBRTC            = 281
+	P_MEMORY            = 777
 )
 
 var (
@@ -205,6 +208,13 @@ var (
 		Code:  P_HTTP,
 		VCode: CodeToVarint(P_HTTP),
 	}
+	protoHTTPPath = Protocol{
+		Name:       "http-path",
+		Code:       P_HTTP_PATH,
+		VCode:      CodeToVarint(P_HTTP_PATH),
+		Size:       LengthPrefixedVarSize,
+		Transcoder: TranscoderHTTPPath,
+	}
 	protoHTTPS = Protocol{
 		Name:  "https",
 		Code:  P_HTTPS,
@@ -262,10 +272,23 @@ var (
 		Code:  P_WSS,
 		VCode: CodeToVarint(P_WSS),
 	}
+	protoWebRTCDirect = Protocol{
+		Name:  "webrtc-direct",
+		Code:  P_WEBRTC_DIRECT,
+		VCode: CodeToVarint(P_WEBRTC_DIRECT),
+	}
 	protoWebRTC = Protocol{
 		Name:  "webrtc",
 		Code:  P_WEBRTC,
 		VCode: CodeToVarint(P_WEBRTC),
+	}
+
+	protoMemory = Protocol{
+		Name:       "memory",
+		Code:       P_MEMORY,
+		VCode:      CodeToVarint(P_MEMORY),
+		Size:       64,
+		Transcoder: TranscoderMemory,
 	}
 )
 
@@ -295,6 +318,7 @@ func init() {
 		protoWEBTRANSPORT,
 		protoCERTHASH,
 		protoHTTP,
+		protoHTTPPath,
 		protoHTTPS,
 		protoP2P,
 		protoUNIX,
@@ -305,7 +329,9 @@ func init() {
 		protoWS,
 		protoWSS,
 		protoPlaintextV2,
+		protoWebRTCDirect,
 		protoWebRTC,
+		protoMemory,
 	} {
 		if err := AddProtocol(p); err != nil {
 			panic(err)

@@ -3,15 +3,14 @@ package multiaddr
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
+	"math"
 	"math/rand"
-	"strings"
 	"testing"
-	"time"
-
-	"github.com/stretchr/testify/require"
 
 	"github.com/ipfs/go-cid"
 	mh "github.com/multiformats/go-multihash"
+	"github.com/stretchr/testify/require"
 )
 
 func newMultiaddr(t *testing.T, a string) Multiaddr {
@@ -20,6 +19,73 @@ func newMultiaddr(t *testing.T, a string) Multiaddr {
 		t.Error(err)
 	}
 	return m
+}
+
+func TestReturnsNilOnEmpty(t *testing.T) {
+	a := StringCast("/ip4/1.2.3.4")
+	a, _ = SplitLast(a)
+	require.Nil(t, a)
+	a, _ = SplitLast(a)
+	require.Nil(t, a)
+
+	a, c := SplitLast(nil)
+	require.Zero(t, len(a.Protocols()))
+	require.Nil(t, a)
+	require.Nil(t, c)
+
+	// Test that empty multiaddr from various operations returns nil
+	a = StringCast("/ip4/1.2.3.4/tcp/1234")
+	_, a = SplitFirst(a)
+	_, a = SplitFirst(a)
+	require.Nil(t, a)
+	_, a = SplitFirst(a)
+	require.Nil(t, a)
+
+	c, a = SplitFirst(nil)
+	require.Nil(t, a)
+	require.Nil(t, c)
+
+	a = StringCast("/ip4/1.2.3.4/tcp/1234")
+	a = a.Decapsulate(a)
+	require.Nil(t, a)
+
+	a = StringCast("/ip4/1.2.3.4/tcp/1234")
+	a = a.Decapsulate(StringCast("/tcp/1234"))
+	a = a.Decapsulate(StringCast("/ip4/1.2.3.4"))
+	require.Nil(t, a)
+
+	// Test that SplitFunc returns nil when we split at beginning and end
+	a = StringCast("/ip4/1.2.3.4/tcp/1234")
+	pre, _ := SplitFunc(a, func(c Component) bool {
+		return c.Protocol().Code == P_IP4
+	})
+	require.Nil(t, pre)
+
+	a = StringCast("/ip4/1.2.3.4/tcp/1234")
+	_, post := SplitFunc(a, func(c Component) bool {
+		return false
+	})
+	require.Nil(t, post)
+
+	_, err := NewMultiaddr("")
+	require.Error(t, err)
+
+	var nilMultiaddr Multiaddr
+	a = nilMultiaddr.AppendComponent()
+	require.Nil(t, a)
+
+	a = Join()
+	require.Nil(t, a)
+}
+
+func TestJoinWithComponents(t *testing.T) {
+	var m Multiaddr
+	c, err := NewComponent("ip4", "127.0.0.1")
+	require.NoError(t, err)
+
+	expected := "/ip4/127.0.0.1"
+	require.Equal(t, expected, Join(m, c).String())
+
 }
 
 func TestConstructFails(t *testing.T) {
@@ -84,9 +150,12 @@ func TestConstructFails(t *testing.T) {
 		"/ip4/127.0.0.1/p2p/tcp",
 		"/unix",
 		"/ip4/1.2.3.4/tcp/80/unix",
+		"/ip4/1.2.3.4/tcp/-1",
 		"/ip4/127.0.0.1/tcp/9090/http/p2p-webcrt-direct",
+		fmt.Sprintf("/memory/%d1", uint64(1<<63)),
 		"/",
 		"",
+		"/p2p/QmxoHT6iViN5xAjoz1VZ553cL31U9F94ht3QvWR1FrEbZY", // sha256 multihash with digest len > 32
 	}
 
 	for _, a := range cases {
@@ -103,96 +172,104 @@ func TestEmptyMultiaddr(t *testing.T) {
 	}
 }
 
-func TestConstructSucceeds(t *testing.T) {
-	cases := []string{
-		"/ip4/1.2.3.4",
-		"/ip4/0.0.0.0",
-		"/ip4/192.0.2.0/ipcidr/24",
-		"/ip6/::1",
-		"/ip6/2601:9:4f81:9700:803e:ca65:66e8:c21",
-		"/ip6/2601:9:4f81:9700:803e:ca65:66e8:c21/udp/1234/quic",
-		"/ip6/2601:9:4f81:9700:803e:ca65:66e8:c21/udp/1234/quic-v1",
-		"/ip6/2001:db8::/ipcidr/32",
-		"/ip6zone/x/ip6/fe80::1",
-		"/ip6zone/x%y/ip6/fe80::1",
-		"/ip6zone/x%y/ip6/::",
-		"/ip6zone/x/ip6/fe80::1/udp/1234/quic",
-		"/ip6zone/x/ip6/fe80::1/udp/1234/quic-v1",
-		"/onion/timaq4ygg2iegci7:1234",
-		"/onion/timaq4ygg2iegci7:80/http",
-		"/onion3/vww6ybal4bd7szmgncyruucpgfkqahzddi37ktceo3ah7ngmcopnpyyd:1234",
-		"/onion3/vww6ybal4bd7szmgncyruucpgfkqahzddi37ktceo3ah7ngmcopnpyyd:80/http",
-		"/garlic64/jT~IyXaoauTni6N4517EG8mrFUKpy0IlgZh-EY9csMAk82Odatmzr~YTZy8Hv7u~wvkg75EFNOyqb~nAPg-khyp2TS~ObUz8WlqYAM2VlEzJ7wJB91P-cUlKF18zSzVoJFmsrcQHZCirSbWoOknS6iNmsGRh5KVZsBEfp1Dg3gwTipTRIx7Vl5Vy~1OSKQVjYiGZS9q8RL0MF~7xFiKxZDLbPxk0AK9TzGGqm~wMTI2HS0Gm4Ycy8LYPVmLvGonIBYndg2bJC7WLuF6tVjVquiokSVDKFwq70BCUU5AU-EvdOD5KEOAM7mPfw-gJUG4tm1TtvcobrObqoRnmhXPTBTN5H7qDD12AvlwFGnfAlBXjuP4xOUAISL5SRLiulrsMSiT4GcugSI80mF6sdB0zWRgL1yyvoVWeTBn1TqjO27alr95DGTluuSqrNAxgpQzCKEWAyzrQkBfo2avGAmmz2NaHaAvYbOg0QSJz1PLjv2jdPW~ofiQmrGWM1cd~1cCqAAAA",
-		"/garlic64/jT~IyXaoauTni6N4517EG8mrFUKpy0IlgZh-EY9csMAk82Odatmzr~YTZy8Hv7u~wvkg75EFNOyqb~nAPg-khyp2TS~ObUz8WlqYAM2VlEzJ7wJB91P-cUlKF18zSzVoJFmsrcQHZCirSbWoOknS6iNmsGRh5KVZsBEfp1Dg3gwTipTRIx7Vl5Vy~1OSKQVjYiGZS9q8RL0MF~7xFiKxZDLbPxk0AK9TzGGqm~wMTI2HS0Gm4Ycy8LYPVmLvGonIBYndg2bJC7WLuF6tVjVquiokSVDKFwq70BCUU5AU-EvdOD5KEOAM7mPfw-gJUG4tm1TtvcobrObqoRnmhXPTBTN5H7qDD12AvlwFGnfAlBXjuP4xOUAISL5SRLiulrsMSiT4GcugSI80mF6sdB0zWRgL1yyvoVWeTBn1TqjO27alr95DGTluuSqrNAxgpQzCKEWAyzrQkBfo2avGAmmz2NaHaAvYbOg0QSJz1PLjv2jdPW~ofiQmrGWM1cd~1cCqAAAA/http",
-		"/garlic64/jT~IyXaoauTni6N4517EG8mrFUKpy0IlgZh-EY9csMAk82Odatmzr~YTZy8Hv7u~wvkg75EFNOyqb~nAPg-khyp2TS~ObUz8WlqYAM2VlEzJ7wJB91P-cUlKF18zSzVoJFmsrcQHZCirSbWoOknS6iNmsGRh5KVZsBEfp1Dg3gwTipTRIx7Vl5Vy~1OSKQVjYiGZS9q8RL0MF~7xFiKxZDLbPxk0AK9TzGGqm~wMTI2HS0Gm4Ycy8LYPVmLvGonIBYndg2bJC7WLuF6tVjVquiokSVDKFwq70BCUU5AU-EvdOD5KEOAM7mPfw-gJUG4tm1TtvcobrObqoRnmhXPTBTN5H7qDD12AvlwFGnfAlBXjuP4xOUAISL5SRLiulrsMSiT4GcugSI80mF6sdB0zWRgL1yyvoVWeTBn1TqjO27alr95DGTluuSqrNAxgpQzCKEWAyzrQkBfo2avGAmmz2NaHaAvYbOg0QSJz1PLjv2jdPW~ofiQmrGWM1cd~1cCqAAAA/udp/8080",
-		"/garlic64/jT~IyXaoauTni6N4517EG8mrFUKpy0IlgZh-EY9csMAk82Odatmzr~YTZy8Hv7u~wvkg75EFNOyqb~nAPg-khyp2TS~ObUz8WlqYAM2VlEzJ7wJB91P-cUlKF18zSzVoJFmsrcQHZCirSbWoOknS6iNmsGRh5KVZsBEfp1Dg3gwTipTRIx7Vl5Vy~1OSKQVjYiGZS9q8RL0MF~7xFiKxZDLbPxk0AK9TzGGqm~wMTI2HS0Gm4Ycy8LYPVmLvGonIBYndg2bJC7WLuF6tVjVquiokSVDKFwq70BCUU5AU-EvdOD5KEOAM7mPfw-gJUG4tm1TtvcobrObqoRnmhXPTBTN5H7qDD12AvlwFGnfAlBXjuP4xOUAISL5SRLiulrsMSiT4GcugSI80mF6sdB0zWRgL1yyvoVWeTBn1TqjO27alr95DGTluuSqrNAxgpQzCKEWAyzrQkBfo2avGAmmz2NaHaAvYbOg0QSJz1PLjv2jdPW~ofiQmrGWM1cd~1cCqAAAA/tcp/8080",
-		"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuq",
-		"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuqzwas",
-		"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuqzwassw",
-		"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuq/http",
-		"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuq/tcp/8080",
-		"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuq/udp/8080",
-		"/udp/0",
-		"/tcp/0",
-		"/sctp/0",
-		"/udp/1234",
-		"/tcp/1234",
-		"/sctp/1234",
-		"/udp/65535",
-		"/tcp/65535",
-		"/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC",
-		"/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7",
-		"/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC",
-		"/p2p/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7",
-		"/p2p/bafzbeigvf25ytwc3akrijfecaotc74udrhcxzh2cx3we5qqnw5vgrei4bm",
-		"/p2p/12D3KooWCryG7Mon9orvQxcS1rYZjotPgpwoJNHHKcLLfE4Hf5mV",
-		"/p2p/k51qzi5uqu5dhb6l8spkdx7yxafegfkee5by8h7lmjh2ehc2sgg34z7c15vzqs",
-		"/p2p/bafzaajaiaejcalj543iwv2d7pkjt7ykvefrkfu7qjfi6sduakhso4lay6abn2d5u",
-		"/udp/1234/sctp/1234",
-		"/udp/1234/udt",
-		"/udp/1234/utp",
-		"/tcp/1234/http",
-		"/tcp/1234/tls/http",
-		"/tcp/1234/https",
-		"/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234",
-		"/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234",
-		"/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234",
-		"/p2p/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234",
-		"/ip4/127.0.0.1/udp/1234",
-		"/ip4/127.0.0.1/udp/0",
-		"/ip4/127.0.0.1/tcp/1234",
-		"/ip4/127.0.0.1/tcp/1234/",
-		"/ip4/127.0.0.1/udp/1234/quic",
-		"/ip4/127.0.0.1/udp/1234/quic-v1",
-		"/ip4/127.0.0.1/udp/1234/quic-v1/webtransport",
-		"/ip4/127.0.0.1/udp/1234/quic-v1/webtransport/certhash/b2uaraocy6yrdblb4sfptaddgimjmmpy",
-		"/ip4/127.0.0.1/udp/1234/quic-v1/webtransport/certhash/b2uaraocy6yrdblb4sfptaddgimjmmpy/certhash/zQmbWTwYGcmdyK9CYfNBcfs9nhZs17a6FQ4Y8oea278xx41",
-		"/ip4/127.0.0.1/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC",
-		"/ip4/127.0.0.1/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234",
-		"/ip4/127.0.0.1/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7",
-		"/ip4/127.0.0.1/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234",
-		"/ip4/127.0.0.1/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC",
-		"/ip4/127.0.0.1/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234",
-		"/ip4/127.0.0.1/p2p/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7",
-		"/ip4/127.0.0.1/p2p/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234",
-		"/unix/a/b/c/d/e",
-		"/unix/stdio",
-		"/ip4/1.2.3.4/tcp/80/unix/a/b/c/d/e/f",
-		"/ip4/127.0.0.1/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234/unix/stdio",
-		"/ip4/127.0.0.1/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234/unix/stdio",
-		"/ip4/127.0.0.1/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234/unix/stdio",
-		"/ip4/127.0.0.1/p2p/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234/unix/stdio",
-		"/ip4/127.0.0.1/tcp/9090/http/p2p-webrtc-direct",
-		"/ip4/127.0.0.1/tcp/127/ws",
-		"/ip4/127.0.0.1/tcp/127/ws",
-		"/ip4/127.0.0.1/tcp/127/tls",
-		"/ip4/127.0.0.1/tcp/127/tls/ws",
-		"/ip4/127.0.0.1/tcp/127/noise",
-		"/ip4/127.0.0.1/tcp/127/wss",
-		"/ip4/127.0.0.1/tcp/127/wss",
-	}
+var good = []string{
+	"/ip4/1.2.3.4",
+	"/ip4/0.0.0.0",
+	"/ip4/192.0.2.0/ipcidr/24",
+	"/ip6/::1",
+	"/ip6/2601:9:4f81:9700:803e:ca65:66e8:c21",
+	"/ip6/2601:9:4f81:9700:803e:ca65:66e8:c21/udp/1234/quic",
+	"/ip6/2601:9:4f81:9700:803e:ca65:66e8:c21/udp/1234/quic-v1",
+	"/ip6/2001:db8::/ipcidr/32",
+	"/ip6zone/x/ip6/fe80::1",
+	"/ip6zone/x%y/ip6/fe80::1",
+	"/ip6zone/x%y/ip6/::",
+	"/ip6zone/x/ip6/fe80::1/udp/1234/quic",
+	"/ip6zone/x/ip6/fe80::1/udp/1234/quic-v1",
+	"/onion/timaq4ygg2iegci7:1234",
+	"/onion/timaq4ygg2iegci7:80/http",
+	"/onion3/vww6ybal4bd7szmgncyruucpgfkqahzddi37ktceo3ah7ngmcopnpyyd:1234",
+	"/onion3/vww6ybal4bd7szmgncyruucpgfkqahzddi37ktceo3ah7ngmcopnpyyd:80/http",
+	"/garlic64/jT~IyXaoauTni6N4517EG8mrFUKpy0IlgZh-EY9csMAk82Odatmzr~YTZy8Hv7u~wvkg75EFNOyqb~nAPg-khyp2TS~ObUz8WlqYAM2VlEzJ7wJB91P-cUlKF18zSzVoJFmsrcQHZCirSbWoOknS6iNmsGRh5KVZsBEfp1Dg3gwTipTRIx7Vl5Vy~1OSKQVjYiGZS9q8RL0MF~7xFiKxZDLbPxk0AK9TzGGqm~wMTI2HS0Gm4Ycy8LYPVmLvGonIBYndg2bJC7WLuF6tVjVquiokSVDKFwq70BCUU5AU-EvdOD5KEOAM7mPfw-gJUG4tm1TtvcobrObqoRnmhXPTBTN5H7qDD12AvlwFGnfAlBXjuP4xOUAISL5SRLiulrsMSiT4GcugSI80mF6sdB0zWRgL1yyvoVWeTBn1TqjO27alr95DGTluuSqrNAxgpQzCKEWAyzrQkBfo2avGAmmz2NaHaAvYbOg0QSJz1PLjv2jdPW~ofiQmrGWM1cd~1cCqAAAA",
+	"/garlic64/jT~IyXaoauTni6N4517EG8mrFUKpy0IlgZh-EY9csMAk82Odatmzr~YTZy8Hv7u~wvkg75EFNOyqb~nAPg-khyp2TS~ObUz8WlqYAM2VlEzJ7wJB91P-cUlKF18zSzVoJFmsrcQHZCirSbWoOknS6iNmsGRh5KVZsBEfp1Dg3gwTipTRIx7Vl5Vy~1OSKQVjYiGZS9q8RL0MF~7xFiKxZDLbPxk0AK9TzGGqm~wMTI2HS0Gm4Ycy8LYPVmLvGonIBYndg2bJC7WLuF6tVjVquiokSVDKFwq70BCUU5AU-EvdOD5KEOAM7mPfw-gJUG4tm1TtvcobrObqoRnmhXPTBTN5H7qDD12AvlwFGnfAlBXjuP4xOUAISL5SRLiulrsMSiT4GcugSI80mF6sdB0zWRgL1yyvoVWeTBn1TqjO27alr95DGTluuSqrNAxgpQzCKEWAyzrQkBfo2avGAmmz2NaHaAvYbOg0QSJz1PLjv2jdPW~ofiQmrGWM1cd~1cCqAAAA/http",
+	"/garlic64/jT~IyXaoauTni6N4517EG8mrFUKpy0IlgZh-EY9csMAk82Odatmzr~YTZy8Hv7u~wvkg75EFNOyqb~nAPg-khyp2TS~ObUz8WlqYAM2VlEzJ7wJB91P-cUlKF18zSzVoJFmsrcQHZCirSbWoOknS6iNmsGRh5KVZsBEfp1Dg3gwTipTRIx7Vl5Vy~1OSKQVjYiGZS9q8RL0MF~7xFiKxZDLbPxk0AK9TzGGqm~wMTI2HS0Gm4Ycy8LYPVmLvGonIBYndg2bJC7WLuF6tVjVquiokSVDKFwq70BCUU5AU-EvdOD5KEOAM7mPfw-gJUG4tm1TtvcobrObqoRnmhXPTBTN5H7qDD12AvlwFGnfAlBXjuP4xOUAISL5SRLiulrsMSiT4GcugSI80mF6sdB0zWRgL1yyvoVWeTBn1TqjO27alr95DGTluuSqrNAxgpQzCKEWAyzrQkBfo2avGAmmz2NaHaAvYbOg0QSJz1PLjv2jdPW~ofiQmrGWM1cd~1cCqAAAA/udp/8080",
+	"/garlic64/jT~IyXaoauTni6N4517EG8mrFUKpy0IlgZh-EY9csMAk82Odatmzr~YTZy8Hv7u~wvkg75EFNOyqb~nAPg-khyp2TS~ObUz8WlqYAM2VlEzJ7wJB91P-cUlKF18zSzVoJFmsrcQHZCirSbWoOknS6iNmsGRh5KVZsBEfp1Dg3gwTipTRIx7Vl5Vy~1OSKQVjYiGZS9q8RL0MF~7xFiKxZDLbPxk0AK9TzGGqm~wMTI2HS0Gm4Ycy8LYPVmLvGonIBYndg2bJC7WLuF6tVjVquiokSVDKFwq70BCUU5AU-EvdOD5KEOAM7mPfw-gJUG4tm1TtvcobrObqoRnmhXPTBTN5H7qDD12AvlwFGnfAlBXjuP4xOUAISL5SRLiulrsMSiT4GcugSI80mF6sdB0zWRgL1yyvoVWeTBn1TqjO27alr95DGTluuSqrNAxgpQzCKEWAyzrQkBfo2avGAmmz2NaHaAvYbOg0QSJz1PLjv2jdPW~ofiQmrGWM1cd~1cCqAAAA/tcp/8080",
+	"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuq",
+	"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuqzwas",
+	"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuqzwassw",
+	"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuq/http",
+	"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuq/tcp/8080",
+	"/garlic32/566niximlxdzpanmn4qouucvua3k7neniwss47li5r6ugoertzuq/udp/8080",
+	"/udp/0",
+	"/tcp/0",
+	"/sctp/0",
+	"/udp/1234",
+	"/tcp/1234",
+	"/sctp/1234",
+	"/udp/65535",
+	"/tcp/65535",
+	"/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC",
+	"/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7",
+	"/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC",
+	"/p2p/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7",
+	"/p2p/bafzbeigvf25ytwc3akrijfecaotc74udrhcxzh2cx3we5qqnw5vgrei4bm",
+	"/p2p/12D3KooWCryG7Mon9orvQxcS1rYZjotPgpwoJNHHKcLLfE4Hf5mV",
+	"/p2p/k51qzi5uqu5dhb6l8spkdx7yxafegfkee5by8h7lmjh2ehc2sgg34z7c15vzqs",
+	"/p2p/bafzaajaiaejcalj543iwv2d7pkjt7ykvefrkfu7qjfi6sduakhso4lay6abn2d5u",
+	"/udp/1234/sctp/1234",
+	"/udp/1234/udt",
+	"/udp/1234/utp",
+	"/tcp/1234/http",
+	"/tcp/1234/tls/http",
+	"/tcp/1234/https",
+	"/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234",
+	"/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234",
+	"/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234",
+	"/p2p/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234",
+	"/ip4/127.0.0.1/udp/1234",
+	"/ip4/127.0.0.1/udp/0",
+	"/ip4/127.0.0.1/tcp/1234",
+	"/ip4/127.0.0.1/tcp/1234/",
+	"/ip4/127.0.0.1/udp/1234/quic",
+	"/ip4/127.0.0.1/udp/1234/quic-v1",
+	"/ip4/127.0.0.1/udp/1234/quic-v1/webtransport",
+	"/ip4/127.0.0.1/udp/1234/quic-v1/webtransport/certhash/b2uaraocy6yrdblb4sfptaddgimjmmpy",
+	"/ip4/127.0.0.1/udp/1234/quic-v1/webtransport/certhash/b2uaraocy6yrdblb4sfptaddgimjmmpy/certhash/zQmbWTwYGcmdyK9CYfNBcfs9nhZs17a6FQ4Y8oea278xx41",
+	"/ip4/127.0.0.1/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC",
+	"/ip4/127.0.0.1/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234",
+	"/ip4/127.0.0.1/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7",
+	"/ip4/127.0.0.1/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234",
+	"/ip4/127.0.0.1/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC",
+	"/ip4/127.0.0.1/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234",
+	"/ip4/127.0.0.1/p2p/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7",
+	"/ip4/127.0.0.1/p2p/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234",
+	"/unix/a/b/c/d/e",
+	"/unix/stdio",
+	"/ip4/1.2.3.4/tcp/80/unix/a/b/c/d/e/f",
+	"/ip4/127.0.0.1/ipfs/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234/unix/stdio",
+	"/ip4/127.0.0.1/ipfs/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234/unix/stdio",
+	"/ip4/127.0.0.1/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC/tcp/1234/unix/stdio",
+	"/ip4/127.0.0.1/p2p/k2k4r8oqamigqdo6o7hsbfwd45y70oyynp98usk7zmyfrzpqxh1pohl7/tcp/1234/unix/stdio",
+	"/ip4/127.0.0.1/tcp/9090/http/p2p-webrtc-direct",
+	"/ip4/127.0.0.1/tcp/127/ws",
+	"/ip4/127.0.0.1/tcp/127/ws",
+	"/ip4/127.0.0.1/tcp/127/tls",
+	"/ip4/127.0.0.1/tcp/127/tls/ws",
+	"/ip4/127.0.0.1/tcp/127/noise",
+	"/ip4/127.0.0.1/tcp/127/wss",
+	"/ip4/127.0.0.1/tcp/127/wss",
+	"/ip4/127.0.0.1/tcp/127/webrtc-direct",
+	"/ip4/127.0.0.1/tcp/127/webrtc",
+	"/http-path/tmp%2Fbar",
+	"/http-path/tmp%2Fbar%2Fbaz",
+	"/http-path/foo",
+	"/ip4/127.0.0.1/tcp/0/p2p/12D3KooWCryG7Mon9orvQxcS1rYZjotPgpwoJNHHKcLLfE4Hf5mV/http-path/foo",
+	"/ip4/127.0.0.1/tcp/443/tls/sni/example.com/http/http-path/foo",
+	"/memory/4",
+}
 
-	for _, a := range cases {
+func TestConstructSucceeds(t *testing.T) {
+	for _, a := range good {
 		if _, err := NewMultiaddr(a); err != nil {
 			t.Errorf("should have succeeded: %s -- %s", a, err)
 		}
@@ -234,6 +311,28 @@ func TestEqual(t *testing.T) {
 	}
 }
 
+// TestNilInterface makes sure funcs that accept a multiaddr interface don't
+// panic if it's passed a nil interface.
+func TestNilInterface(t *testing.T) {
+	m1 := newMultiaddr(t, "/ip4/127.0.0.1/udp/1234")
+	var m2 Multiaddr
+	m1.Equal(m2)
+	m1.Encapsulate(m2)
+	m1.Decapsulate(m2)
+
+	// Test components
+	c, _ := SplitFirst(m1)
+	c.Multiaddr().Equal(m2)
+	c.Encapsulate(m2)
+	c.Decapsulate(m2)
+
+	// Util funcs
+	_ = Split(m2)
+	_, _ = SplitFirst(m2)
+	_, _ = SplitLast(m2)
+	ForEach(m2, func(c Component) bool { return true })
+}
+
 func TestStringToBytes(t *testing.T) {
 
 	testString := func(s string, h string) {
@@ -253,7 +352,7 @@ func TestStringToBytes(t *testing.T) {
 			t.Error("failed to convert \n", s, "to\n", hex.EncodeToString(b1), "got\n", hex.EncodeToString(b2))
 		}
 
-		if err := validateBytes(b2); err != nil {
+		if _, err := NewMultiaddrBytes(b2); err != nil {
 			t.Error(err, "len:", len(b2))
 		}
 	}
@@ -271,7 +370,6 @@ func TestStringToBytes(t *testing.T) {
 }
 
 func TestBytesToString(t *testing.T) {
-
 	testString := func(s1 string, h string) {
 		t.Helper()
 		b, err := hex.DecodeString(h)
@@ -279,11 +377,12 @@ func TestBytesToString(t *testing.T) {
 			t.Error("failed to decode hex", h)
 		}
 
-		if err := validateBytes(b); err != nil {
+		if _, err := NewMultiaddrBytes(b); err != nil {
 			t.Error(err)
 		}
 
-		s2, err := bytesToString(b)
+		m, err := NewMultiaddrBytes(b)
+		s2 := m.String()
 		if err != nil {
 			t.Log("236", s1, ":", string(h), ":", s2)
 			t.Error("failed to convert", b, err)
@@ -321,18 +420,18 @@ func TestBytesSplitAndJoin(t *testing.T) {
 
 		for i, a := range split {
 			if a.String() != res[i] {
-				t.Errorf("split component failed: %s != %s", a, res[i])
+				t.Errorf("split component failed: %s != %s", &a, res[i])
 			}
 		}
 
-		joined := Join(split...)
+		joined := append(Multiaddr{}, split...)
 		if !m.Equal(joined) {
 			t.Errorf("joined components failed: %s != %s", m, joined)
 		}
 
 		for i, a := range split {
 			if a.String() != res[i] {
-				t.Errorf("split component failed: %s != %s", a, res[i])
+				t.Errorf("split component failed: %s != %s", &a, res[i])
 			}
 		}
 	}
@@ -430,6 +529,19 @@ func TestEncapsulate(t *testing.T) {
 	if d != nil {
 		t.Error("decapsulate /ip4 failed: ", d)
 	}
+
+	t.Run("Encapsulating with components", func(t *testing.T) {
+		left, last := SplitLast(m)
+		joined := left.Encapsulate(last)
+		require.True(t, joined.Equal(m))
+
+		first, rest := SplitFirst(m)
+		joined = first.Encapsulate(rest)
+		require.True(t, joined.Equal(m))
+		// Component type
+		joined = (*first).Encapsulate(rest)
+		require.True(t, joined.Equal(m))
+	})
 }
 
 func TestDecapsulateComment(t *testing.T) {
@@ -451,6 +563,57 @@ func TestDecapsulateComment(t *testing.T) {
 	require.Nil(t, rest, "expected a nil multiaddr if we decapsulate everything")
 }
 
+func TestDecapsulate(t *testing.T) {
+	t.Run("right is nil", func(t *testing.T) {
+		left := StringCast("/ip4/1.2.3.4/tcp/1")
+		var right Multiaddr
+		left.Decapsulate(right)
+	})
+
+	testcases := []struct {
+		left, right, expected string
+	}{
+		{"/ip4/1.2.3.4/tcp/1234", "/ip4/1.2.3.4", ""},
+		{"/ip4/1.2.3.4", "/ip4/1.2.3.4/tcp/1234", "/ip4/1.2.3.4"},
+		{"/ip4/1.2.3.5/tcp/1234", "/ip4/5.3.2.1", "/ip4/1.2.3.5/tcp/1234"},
+		{"/ip4/1.2.3.5/udp/1234/quic-v1", "/udp/1234", "/ip4/1.2.3.5"},
+		{"/ip4/1.2.3.6/udp/1234/quic-v1", "/udp/1234/quic-v1", "/ip4/1.2.3.6"},
+		{"/ip4/1.2.3.7/tcp/1234", "/ws", "/ip4/1.2.3.7/tcp/1234"},
+		{"/dnsaddr/wss.com/tcp/4001", "/ws", "/dnsaddr/wss.com/tcp/4001"},
+		{"/dnsaddr/wss.com/tcp/4001/ws", "/wss", "/dnsaddr/wss.com/tcp/4001/ws"},
+		{"/dnsaddr/wss.com/ws", "/wss", "/dnsaddr/wss.com/ws"},
+		{"/dnsaddr/wss.com/ws", "/dnsaddr/wss.com", ""},
+		{"/dnsaddr/wss.com/tcp/4001/wss", "/wss", "/dnsaddr/wss.com/tcp/4001"},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.left, func(t *testing.T) {
+			left := StringCast(tc.left)
+			right := StringCast(tc.right)
+			actualMa := left.Decapsulate(right)
+
+			if tc.expected == "" {
+				require.Nil(t, actualMa, "expected nil")
+				return
+			}
+
+			actual := actualMa.String()
+			expected := StringCast(tc.expected).String()
+			require.Equal(t, expected, actual)
+		})
+	}
+
+	for _, tc := range testcases {
+		t.Run("Decapsulating with components"+tc.left, func(t *testing.T) {
+			left, last := SplitLast(StringCast(tc.left))
+			butLast := left.Decapsulate(last)
+			require.Equal(t, butLast.String(), left.String())
+			// Round trip
+			require.Equal(t, tc.left, butLast.Encapsulate(last).String())
+		})
+	}
+}
+
 func assertValueForProto(t *testing.T, a Multiaddr, p int, exp string) {
 	t.Logf("checking for %s in %s", ProtocolWithCode(p).Name, a)
 	fv, err := a.ValueForProtocol(p)
@@ -461,6 +624,17 @@ func assertValueForProto(t *testing.T, a Multiaddr, p int, exp string) {
 	if fv != exp {
 		t.Fatalf("expected %q for %d in %s, but got %q instead", exp, p, a, fv)
 	}
+}
+
+func TestAppendComponent(t *testing.T) {
+	var m Multiaddr
+	res := m.AppendComponent(nil)
+	require.Equal(t, m, res)
+
+	c, err := NewComponent("ip4", "127.0.0.1")
+	require.NoError(t, err)
+	res = m.AppendComponent(c)
+	require.Equal(t, "/ip4/127.0.0.1", res.String())
 }
 
 func TestGetValue(t *testing.T) {
@@ -499,55 +673,64 @@ func TestGetValue(t *testing.T) {
 	assertValueForProto(t, a, P_UNIX, "/a/b/c/d")
 }
 
-func TestFuzzBytes(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
-	// Bump up these numbers if you want to stress this
-	buf := make([]byte, 256)
-	for i := 0; i < 2000; i++ {
-		l := rand.Intn(len(buf))
-		rand.Read(buf[:l])
+func FuzzNewMultiaddrBytes(f *testing.F) {
+	for _, v := range good {
+		ma, err := NewMultiaddr(v)
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(ma.Bytes())
+	}
 
-		// just checking that it doesnt panic
-		ma, err := NewMultiaddrBytes(buf[:l])
+	f.Fuzz(func(t *testing.T, b []byte) {
+		// just checking that it doesn't panic
+		ma, err := NewMultiaddrBytes(b)
 		if err == nil {
 			// for any valid multiaddrs, make sure these calls don't panic
-			_ = ma.String()
 			ma.Protocols()
+			roundTripBytes(t, ma)
+			roundTripString(t, ma)
 		}
+	})
+}
+
+func FuzzNewMultiaddrString(f *testing.F) {
+	for _, v := range good {
+		if _, err := NewMultiaddr(v); err != nil {
+			// Validate maddrs
+			f.Fatal(err)
+		}
+		f.Add(v)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		// just checking that it doesn't panic
+		ma, err := NewMultiaddr(s)
+		if err == nil {
+			// for any valid multiaddrs, make sure these calls don't panic
+			ma.Protocols()
+			roundTripBytes(t, ma)
+			roundTripString(t, ma)
+		}
+	})
+}
+
+func roundTripBytes(t *testing.T, orig Multiaddr) {
+	m2, err := NewMultiaddrBytes(orig.Bytes())
+	if err != nil {
+		t.Fatalf("failed to parse maddr back from ma.Bytes, %v: %v", orig, err)
+	}
+	if !m2.Equal(orig) {
+		t.Fatalf("unequal maddr after roundTripBytes %v %v", orig, m2)
 	}
 }
 
-func randMaddrString() string {
-	good_corpus := []string{"tcp", "ip", "udp", "ipfs", "0.0.0.0", "127.0.0.1", "12345", "QmbHVEEepCi7rn7VL7Exxpd2Ci9NNB6ifvqwhsrbRMgQFP"}
-
-	size := rand.Intn(256)
-	parts := make([]string, 0, size)
-	for i := 0; i < size; i++ {
-		switch rand.Intn(5) {
-		case 0, 1, 2:
-			parts = append(parts, good_corpus[rand.Intn(len(good_corpus))])
-		default:
-			badbuf := make([]byte, rand.Intn(256))
-			rand.Read(badbuf)
-			parts = append(parts, string(badbuf))
-		}
+func roundTripString(t *testing.T, orig Multiaddr) {
+	m2, err := NewMultiaddr(orig.String())
+	if err != nil {
+		t.Fatalf("failed to parse maddr back from ma.String, %v: %v", orig, err)
 	}
-
-	return "/" + strings.Join(parts, "/")
-}
-
-func TestFuzzString(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
-	// Bump up these numbers if you want to stress this
-	for i := 0; i < 2000; i++ {
-
-		// just checking that it doesnt panic
-		ma, err := NewMultiaddr(randMaddrString())
-		if err == nil {
-			// for any valid multiaddrs, make sure these calls don't panic
-			_ = ma.String()
-			ma.Protocols()
-		}
+	if !m2.Equal(orig) {
+		t.Fatalf("unequal maddr after roundTripString %v %v\n% 02x\n% 02x\n", orig, m2, orig.Bytes(), m2.Bytes())
 	}
 }
 
@@ -574,6 +757,7 @@ func TestRoundTrip(t *testing.T) {
 		"/ip4/127.0.0.1/udp/1234/quic-v1/webtransport/certhash/uEiDDq4_xNyDorZBH3TlGazyJdOWSwvo4PUo5YHFMrvDE8g",
 		"/p2p/QmbHVEEepCi7rn7VL7Exxpd2Ci9NNB6ifvqwhsrbRMgQFP",
 		"/p2p/QmbHVEEepCi7rn7VL7Exxpd2Ci9NNB6ifvqwhsrbRMgQFP/unix/a/b/c",
+		"/http-path/tmp%2Fbar",
 	} {
 		ma, err := NewMultiaddr(s)
 		if err != nil {
@@ -678,11 +862,11 @@ func TestBinaryMarshaler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var addr2 multiaddr
+	var addr2 Multiaddr
 	if err = addr2.UnmarshalBinary(b); err != nil {
 		t.Fatal(err)
 	}
-	if !addr.Equal(&addr2) {
+	if !addr.Equal(addr2) {
 		t.Error("expected equal addresses in circular marshaling test")
 	}
 }
@@ -694,11 +878,11 @@ func TestTextMarshaler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var addr2 multiaddr
+	var addr2 Multiaddr
 	if err = addr2.UnmarshalText(b); err != nil {
 		t.Fatal(err)
 	}
-	if !addr.Equal(&addr2) {
+	if !addr.Equal(addr2) {
 		t.Error("expected equal addresses in circular marshaling test")
 	}
 }
@@ -710,11 +894,11 @@ func TestJSONMarshaler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var addr2 multiaddr
+	var addr2 Multiaddr
 	if err = addr2.UnmarshalJSON(b); err != nil {
 		t.Fatal(err)
 	}
-	if !addr.Equal(&addr2) {
+	if !addr.Equal(addr2) {
 		t.Error("expected equal addresses in circular marshaling test")
 	}
 }
@@ -729,11 +913,11 @@ func TestComponentBinaryMarshaler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	comp2 := &Component{}
+	var comp2 Component
 	if err = comp2.UnmarshalBinary(b); err != nil {
 		t.Fatal(err)
 	}
-	if !comp.Equal(comp2) {
+	if !comp.Equal(&comp2) {
 		t.Error("expected equal components in circular marshaling test")
 	}
 }
@@ -748,11 +932,11 @@ func TestComponentTextMarshaler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	comp2 := &Component{}
+	var comp2 Component
 	if err = comp2.UnmarshalText(b); err != nil {
 		t.Fatal(err)
 	}
-	if !comp.Equal(comp2) {
+	if !comp.Equal(&comp2) {
 		t.Error("expected equal components in circular marshaling test")
 	}
 }
@@ -767,13 +951,66 @@ func TestComponentJSONMarshaler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	comp2 := &Component{}
+	var comp2 Component
 	if err = comp2.UnmarshalJSON(b); err != nil {
 		t.Fatal(err)
 	}
-	if !comp.Equal(comp2) {
+	if !comp.Equal(&comp2) {
 		t.Error("expected equal components in circular marshaling test")
 	}
+}
+
+func TestUseNil(t *testing.T) {
+	f := func() Multiaddr {
+		return nil
+	}
+
+	_ = f()
+
+	var foo Multiaddr = nil
+	_, right := SplitFirst(foo)
+	right.Protocols()
+	foo.Protocols()
+	foo.Bytes()
+	foo.Compare(nil)
+	foo.Decapsulate(nil)
+	foo.Encapsulate(nil)
+	foo.Equal(nil)
+	_, _ = foo.MarshalBinary()
+	_, _ = foo.MarshalJSON()
+	_, _ = foo.MarshalText()
+	foo.Protocols()
+	_ = foo.String()
+	_ = foo.UnmarshalBinary(nil)
+	_ = foo.UnmarshalJSON(nil)
+	_ = foo.UnmarshalText(nil)
+	_, _ = foo.ValueForProtocol(0)
+}
+
+func TestUseNilComponent(t *testing.T) {
+	var foo *Component
+	foo.Multiaddr()
+	foo.Encapsulate(nil)
+	foo.Decapsulate(nil)
+	require.True(t, foo == nil)
+	foo.Bytes()
+	foo.MarshalBinary()
+	foo.MarshalJSON()
+	foo.MarshalText()
+	foo.UnmarshalBinary(nil)
+	foo.UnmarshalJSON(nil)
+	foo.UnmarshalText(nil)
+	foo.Equal(nil)
+	foo.Compare(nil)
+	foo.Protocols()
+	foo.ValueForProtocol(0)
+	foo.Protocol()
+	foo.RawValue()
+	foo.Value()
+	_ = foo.String()
+
+	var m Multiaddr = nil
+	m.Encapsulate(foo)
 }
 
 func TestFilterAddrs(t *testing.T) {
@@ -810,4 +1047,211 @@ func TestContains(t *testing.T) {
 	require.True(t, Contains(addrs, a4))
 	require.False(t, Contains(addrs, newMultiaddr(t, "/ip4/4.3.2.1/udp/1234/utp")))
 	require.False(t, Contains(nil, a1))
+}
+
+func TestUniqueAddrs(t *testing.T) {
+	tcpAddr := StringCast("/ip4/127.0.0.1/tcp/1234")
+	quicAddr := StringCast("/ip4/127.0.0.1/udp/1234/quic-v1")
+	wsAddr := StringCast("/ip4/127.0.0.1/tcp/1234/ws")
+
+	type testcase struct {
+		in, out []Multiaddr
+	}
+
+	for i, tc := range []testcase{
+		{in: nil, out: nil},
+		{in: []Multiaddr{tcpAddr}, out: []Multiaddr{tcpAddr}},
+		{in: []Multiaddr{tcpAddr, tcpAddr, tcpAddr}, out: []Multiaddr{tcpAddr}},
+		{in: []Multiaddr{tcpAddr, quicAddr, tcpAddr}, out: []Multiaddr{tcpAddr, quicAddr}},
+		{in: []Multiaddr{tcpAddr, quicAddr, wsAddr}, out: []Multiaddr{tcpAddr, quicAddr, wsAddr}},
+	} {
+		tc := tc
+		t.Run(fmt.Sprintf("test %d", i), func(t *testing.T) {
+			deduped := Unique(tc.in)
+			for _, a := range tc.out {
+				require.Contains(t, deduped, a)
+			}
+		})
+	}
+}
+
+func BenchmarkUniqueAddrs(b *testing.B) {
+	b.ReportAllocs()
+	var addrs []Multiaddr
+	r := rand.New(rand.NewSource(1234))
+	for i := 0; i < 100; i++ {
+		tcpAddr := StringCast(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", r.Intn(math.MaxUint16)))
+		quicAddr := StringCast(fmt.Sprintf("/ip4/127.0.0.1/udp/%d/quic-v1", r.Intn(math.MaxUint16)))
+		wsAddr := StringCast(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/ws", r.Intn(math.MaxUint16)))
+		addrs = append(addrs, tcpAddr, tcpAddr, quicAddr, quicAddr, wsAddr)
+	}
+	for _, sz := range []int{10, 20, 30, 50, 100} {
+		b.Run(fmt.Sprintf("%d", sz), func(b *testing.B) {
+			items := make([]Multiaddr, sz)
+			for i := 0; i < b.N; i++ {
+				copy(items, addrs[:sz])
+				Unique(items)
+			}
+		})
+	}
+}
+
+func TestDNS(t *testing.T) {
+	b := []byte("7*000000000000000000000000000000000000000000")
+	a, err := NewMultiaddrBytes(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aa := StringCast(a.String())
+	if !a.Equal(aa) {
+		t.Fatal("expected equality")
+	}
+}
+
+func TestHTTPPath(t *testing.T) {
+	t.Run("bad addr", func(t *testing.T) {
+		badAddr := "/http-path/thisIsMissingAfullByte%f"
+		_, err := NewMultiaddr(badAddr)
+		require.Error(t, err)
+	})
+
+	t.Run("only reads the http-path part", func(t *testing.T) {
+		addr := "/http-path/tmp%2Fbar/p2p-circuit" // The http-path only reference the part immediately after it. It does not include the rest of the multiaddr (like the /path component sometimes does)
+		m, err := NewMultiaddr(addr)
+		require.NoError(t, err)
+		m.ValueForProtocol(P_HTTP_PATH)
+		v, err := m.ValueForProtocol(P_HTTP_PATH)
+		require.NoError(t, err)
+		require.Equal(t, "tmp%2Fbar", v)
+	})
+
+	t.Run("round trip", func(t *testing.T) {
+		cases := []string{
+			"/http-path/tmp%2Fbar",
+			"/http-path/tmp%2Fbar%2Fbaz",
+			"/http-path/foo",
+			"/ip4/127.0.0.1/tcp/0/p2p/12D3KooWCryG7Mon9orvQxcS1rYZjotPgpwoJNHHKcLLfE4Hf5mV/http-path/foo",
+			"/ip4/127.0.0.1/tcp/443/tls/sni/example.com/http/http-path/foo",
+		}
+		for _, c := range cases {
+			m, err := NewMultiaddr(c)
+			require.NoError(t, err)
+			require.Equal(t, c, m.String())
+		}
+	})
+
+	t.Run("value for protocol", func(t *testing.T) {
+		m := StringCast("/http-path/tmp%2Fbar")
+		v, err := m.ValueForProtocol(P_HTTP_PATH)
+		require.NoError(t, err)
+		// This gives us the url escaped version
+		require.Equal(t, "tmp%2Fbar", v)
+
+		// If we want the raw unescaped version, we can use the component and read it
+		_, component := SplitLast(m)
+		require.Equal(t, "tmp/bar", string(component.RawValue()))
+	})
+}
+
+func FuzzSplitRoundtrip(f *testing.F) {
+	for _, v := range good {
+		f.Add(v)
+	}
+	otherMultiaddr := StringCast("/udp/1337")
+
+	f.Fuzz(func(t *testing.T, addrStr string) {
+		addr, err := NewMultiaddr(addrStr)
+		if err != nil {
+			t.Skip() // Skip inputs that are not valid multiaddrs
+		}
+
+		// Test SplitFirst
+		first, rest := SplitFirst(addr)
+		joined := Join(first, rest)
+		require.True(t, addr.Equal(joined), "SplitFirst and Join should round-trip")
+
+		// Test SplitLast
+		rest, last := SplitLast(addr)
+		joined = Join(rest, last)
+		require.True(t, addr.Equal(joined), "SplitLast and Join should round-trip")
+
+		p := addr.Protocols()
+		if len(p) == 0 {
+			t.Skip()
+		}
+
+		tryPubMethods := func(a Multiaddr) {
+			if a == nil {
+				return
+			}
+			_ = a.Equal(otherMultiaddr)
+			_ = a.Bytes()
+			_ = a.String()
+			_ = a.Protocols()
+			_ = a.Encapsulate(otherMultiaddr)
+			_ = a.Decapsulate(otherMultiaddr)
+			_, _ = a.ValueForProtocol(P_TCP)
+		}
+
+		for _, proto := range p {
+			splitFunc := func(c Component) bool {
+				return c.Protocol().Code == proto.Code
+			}
+			beforeC, after := SplitFirst(addr)
+			joined = Join(beforeC, after)
+			require.True(t, addr.Equal(joined))
+			tryPubMethods(after)
+
+			before, afterC := SplitLast(addr)
+			joined = Join(before, afterC)
+			require.True(t, addr.Equal(joined))
+			tryPubMethods(before)
+
+			before, after = SplitFunc(addr, splitFunc)
+			joined = Join(before, after)
+			require.True(t, addr.Equal(joined))
+			tryPubMethods(before)
+			tryPubMethods(after)
+		}
+	})
+}
+
+func BenchmarkComponentValidation(b *testing.B) {
+	comp, err := NewComponent("ip4", "127.0.0.1")
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		err := validateComponent(comp)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func FuzzComponents(f *testing.F) {
+	for _, v := range good {
+		m := StringCast(v)
+		for _, c := range m {
+			f.Add(c.Bytes())
+		}
+	}
+	f.Fuzz(func(t *testing.T, compBytes []byte) {
+		n, c, err := readComponent(compBytes)
+		if err != nil {
+			t.Skip()
+		}
+		if c.protocol == nil {
+			t.Fatal("component has nil protocol")
+		}
+		if c.protocol.Code == 0 {
+			t.Fatal("component has nil protocol code")
+		}
+		if !bytes.Equal(c.Bytes(), compBytes[:n]) {
+			t.Logf("component bytes: %v", c.Bytes())
+			t.Logf("original bytes: %v", compBytes[:n])
+			t.Fatal("component bytes are not equal to the original bytes")
+		}
+	})
 }
